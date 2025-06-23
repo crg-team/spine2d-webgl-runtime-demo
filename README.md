@@ -1,5 +1,4 @@
-
-![Kapture 2025-06-23 at 21 41 13](https://github.com/user-attachments/assets/78226a01-e55f-4ca9-8f8f-c6dab038b0c2)
+![Kapture 2025-06-23 at 21-41-13](https://github.com/user-attachments/assets/da475512-4cde-45a5-bc3d-e84e6146b370)
 
 # spine2d-webgl-runtime-demo
 
