@@ -1,0 +1,12 @@
+{
+  "name": "spine-desktop-pet",
+  "version": "1.0.0",
+  "main": "main.js",
+  "description": "Spine+MediaPipe demo",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^29.0.0"
+  }
+}

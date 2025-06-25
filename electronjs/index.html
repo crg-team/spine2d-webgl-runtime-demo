@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Spine 桌宠</title>
+    <style>
+      html, body, #canvas {
+        width: 100vw;
+        height: 100vh;
+        margin: 0; padding: 0; overflow: hidden;
+        background: transparent !important;
+      }
+      body { background: transparent !important; }
+      #canvas {
+        background: transparent !important;
+        position: absolute;
+        left: 0; top: 0;
+      }
+    </style>
+    <script src="https://unpkg.com/@esotericsoftware/spine-webgl@4.2.*/dist/iife/spine-webgl.js"></script>
+    <script type="module">
+      import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+      window.mediapipeVision = vision;
+    </script>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <video id="video" autoplay playsinline style="display:none"></video>
+    <script type="module">
+
+      const { FaceLandmarker, FilesetResolver } = await window.mediapipeVision;
+      let faceLandmarker = null;
+      let video = document.getElementById("video");
+
+      async function createFaceLandmarker() {
+        const filesetResolver = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+        );
+        faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+            delegate: "GPU"
+          },
+          outputFaceBlendshapes: true,
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+      }
+      await createFaceLandmarker();
+
+      async function setupCamera() {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        return new Promise(resolve => {
+          video.onloadedmetadata = () => { resolve(); };
+        });
+      }
+      await setupCamera();
+
+      class App {
+        constructor(domCanvas) {
+          this.skeleton = null;
+          this.animationState = null;
+          this.domCanvas = domCanvas;
+          this.lastBlink = false;
+          this.lookOffset = { x: 0, y: 0 };
+        }
+
+        loadAssets(canvas) {
+          canvas.assetManager.loadBinary("assets/Frame.skel");
+          canvas.assetManager.loadTextureAtlas("assets/Frame.atlas");
+        }
+
+        initialize(canvas) {
+          let assetManager = canvas.assetManager;
+          var atlas = assetManager.require("assets/Frame.atlas");
+          var atlasLoader = new spine.AtlasAttachmentLoader(atlas);
+          var skeletonBinary = new spine.SkeletonBinary(atlasLoader);
+          skeletonBinary.scale = 0.2;
+          var skeletonData = skeletonBinary.readSkeletonData(
+            assetManager.require("assets/Frame.skel")
+          );
+          this.skeleton = new spine.Skeleton(skeletonData);
+          var animationStateData = new spine.AnimationStateData(skeletonData);
+          this.animationState = new spine.AnimationState(animationStateData);
+          this.animationState.setAnimation(0, "animation", true);
+        }
+
+        update(canvas, delta) {
+          this.animationState.update(delta);
+          this.animationState.apply(this.skeleton);
+          this.skeleton.update(delta);
+          this.updateLookMain();
+          this.skeleton.updateWorldTransform(spine.Physics.update);
+        }
+
+        updateLookMain() {
+          if (!this.skeleton) return;
+          const bone = this.skeleton.findBone("look_main");
+          if (!bone) return;
+          const maxOffset = 900;
+          bone.x = Math.max(-maxOffset, Math.min(this.lookOffset.x, maxOffset));
+          bone.y = Math.max(-maxOffset, Math.min(this.lookOffset.y, maxOffset));
+          bone.appliedValid = false;
+        }
+
+        setLookOffset(x, y) {
+          this.lookOffset.x = x;
+          this.lookOffset.y = y;
+        }
+
+        triggerBlink(blinkNow) {
+          if (blinkNow && !this.lastBlink) {
+            this.animationState.setAnimation(1, "blink", false);
+          }
+          this.lastBlink = blinkNow;
+        }
+
+        render(canvas) {
+          let renderer = canvas.renderer;
+          renderer.resize(spine.ResizeMode.Expand);
+          renderer.begin();
+          renderer.drawSkeleton(this.skeleton, true);
+          renderer.end();
+        }
+      }
+
+      const domCanvas = document.getElementById("canvas");
+      let spineApp = new App(domCanvas);
+      let spineCanvas = new spine.SpineCanvas(domCanvas, { app: spineApp });
+
+      async function mediapipeLoop() {
+        if (faceLandmarker && video.readyState >= 2 && spineApp) {
+          const currentTimeMs = performance.now();
+          const results = faceLandmarker.detectForVideo(video, currentTimeMs);
+          if (results.faceBlendshapes?.length) {
+            let blinkL = 0, blinkR = 0;
+            for (let b of results.faceBlendshapes[0].categories) {
+              if (b.categoryName === "eyeBlinkLeft") blinkL = b.score;
+              if (b.categoryName === "eyeBlinkRight") blinkR = b.score;
+            }
+            const isBlinking = (blinkL + blinkR) / 2 > 0.7;
+            spineApp.triggerBlink(isBlinking);
+          }
+        }
+        requestAnimationFrame(mediapipeLoop);
+      }
+      mediapipeLoop();
+
+      async function globalMouseLoop() {
+        if (window.electronAPI && spineApp) {
+          const { x, y } = await window.electronAPI.getCursor();
+          const rect = domCanvas.getBoundingClientRect();
+          const winCenterX = window.screenX + rect.width / 2;
+          const winCenterY = window.screenY + rect.height / 2;
+          const dx = x - winCenterX;
+          const dy = y - winCenterY;
+          spineApp.setLookOffset(dx, -dy);
+        }
+        setTimeout(globalMouseLoop, 16);
+      }
+      globalMouseLoop();
+
+      const TV_RADIUS = 150; 
+      domCanvas.addEventListener('mousemove', (e) => {
+
+        const rect = domCanvas.getBoundingClientRect();
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const dx = mx - cx;
+        const dy = my - cy;
+        if (dx * dx + dy * dy <= TV_RADIUS * TV_RADIUS) {
+          domCanvas.style.webkitAppRegion = 'drag';
+        } else {
+          domCanvas.style.webkitAppRegion = 'none';
+        }
+      });
+      domCanvas.addEventListener('mouseleave', () => {
+        domCanvas.style.webkitAppRegion = 'none';
+      });
+    </script>
+  </body>
+</html>
