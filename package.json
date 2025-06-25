@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "start": "servor --reload"
+    "start": "http-server . -p 8080"
   },
   "dependencies": {
-    "servor": "^4.0.2"
+    "http-server": "^14.1.1"
   }
 }
